@@ -215,6 +215,7 @@ class BlendLayerMean(nn.Module):
         self.config = config
 
     def forward(self, x):
+        #print("blender layer mean", x.size())
         return x.mean(dim=0)
 
 
@@ -350,6 +351,7 @@ class BlenderbotDecoderLayerWithPals(nn.Module):
             present_key_value = present_key_value + cross_attn_present_key_value
 
         if self.pals_work_state:
+            #print("worker_idx", self.workers_in_branches)
             embeddings = [hidden_states] + [branch[worker_idx](initial_layer_norm)
                                 for branch, worker_idx in
                                 zip(self.branches, self.workers_in_branches)]
@@ -434,6 +436,7 @@ class BlenderbotModel(BlenderbotPreTrainedModel):
         super().__init__(config)
 
         padding_idx, vocab_size = config.pad_token_id, config.vocab_size
+        
         self.shared = nn.Embedding(vocab_size, config.d_model, padding_idx)
 
         self.encoder = BlenderbotEncoder(config, self.shared)
@@ -465,6 +468,19 @@ class BlenderbotModel(BlenderbotPreTrainedModel):
 
     def get_decoder(self):
         return self.decoder
+        
+    def setup_trainable_parts(self,
+                              branches: Optional[List[int]] = None,
+                              train_base_model=False):
+        for param in self.parameters():
+            param.requires_grad = train_base_model
+        self.decoder.choose_trainable_branches(branches)
+
+    def set_pals_work_state(self, working_pals: Optional[List[int]] = None):
+        self.decoder.set_pals_work_state(working_pals)
+
+    def choose_workers_in_branches(self, workers_in_branches=None):
+        self.decoder.choose_workers_in_branches(workers_in_branches)
 
     def forward(
         self,
@@ -724,6 +740,17 @@ class BlenderbotForConditionalGeneration(BlenderbotPreTrainedModel):
                 tuple(past_state.index_select(0, beam_idx) for past_state in layer_past[:2]) + layer_past[2:],
             )
         return reordered_past
+    
+    def setup_trainable_parts(self,
+                              branches: Optional[List[int]] = None,
+                              train_base_model=False):
+        self.model.setup_trainable_parts(branches, train_base_model)
+
+    def set_pals_work_state(self, working_pals: Optional[List[int]] = None):
+        self.model.set_pals_work_state(working_pals)
+
+    def choose_workers_in_branches(self, workers_in_branches=None):
+        self.model.choose_workers_in_branches(workers_in_branches)
 
 
 # Copied from transformers.models.bart.modeling_bart.BartDecoderWrapper with Bart->Blenderbot
